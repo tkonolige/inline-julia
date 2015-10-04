@@ -19,13 +19,13 @@ end
 
 # release a held reference
 function release(i::Int64)
-  refs[i] = None
+  refs[i] = Union{}
   push!(stack, i)
 end
 
 # utility to show a julia value in haskell
 function show(x)
-  convert(Ptr{Uint8}, repr(x))
+  Base.unsafe_convert(Cstring, repr(x))
 end
 
 end

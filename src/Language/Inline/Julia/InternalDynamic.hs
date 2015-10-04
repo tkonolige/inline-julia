@@ -5,9 +5,10 @@ import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.Marshal.Array
 import Foreign.Marshal.Utils
-import GHC.ForeignPtr
-import Foreign.StablePtr
+import Foreign.Marshal.Alloc
+import Foreign.Storable
 import Foreign.C.String
+import GHC.ForeignPtr
 import System.Posix.DynamicLinker
 import System.IO.Unsafe
 import Control.Exception
@@ -17,6 +18,7 @@ import Control.Concurrent.MVar
 
 import Debug.Trace
 
+-- TODO: precompile julia functions
 -- TODO: memory management
 -- | memory management when briding the gap between julia and haskell is a
 -- little interesting. All julia functions which return a pointer require that
@@ -45,7 +47,7 @@ newtype JLModule = JLModule (ForeignPtr JLModule)
 {-# NOINLINE juliaLock #-}
 juliaLock :: MVar ()
 juliaLock = unsafePerformIO $ do
-  jlInit "/Users/tristan/Applications/Julia-0.3.10.app/Contents/Resources/julia/libexec"
+  jlInit "/Applications/Julia-0.4.0-rc3.app/Contents/Resources/julia/libexec"
   newMVar ()
 
 -- this function is unsafe because it does not retain julia values
@@ -66,6 +68,7 @@ callJuliaUnsafe f ret args = withMVar juliaLock $ const $ do
 callJulia :: FunPtr c -> [Arg] -> IO JLVal
 callJulia a b = do
   x <- handle f $ callJuliaUnsafe a (retPtr retVoid) b
+  -- TODO: check if result is null and dont push gc
   jlGCPush x
   where
     f :: RawJuliaException -> IO a
@@ -124,6 +127,9 @@ jl_unbox_int64 = unsafePerformIO $ dlsym libjulia "jl_unbox_int64"
 
 {-# NOINLINE jl_exception_occurred #-}
 jl_exception_occurred = unsafePerformIO $ dlsym libjulia "jl_exception_occurred"
+
+{-# NOINLINE jl_gc_add_finalizer #-}
+jl_gc_add_finalizer = unsafePerformIO $ dlsym libjulia "jl_gc_add_finalizer"
 
 foreign import ccall "atexit" atexit :: FunPtr () -> IO ()
 
@@ -200,8 +206,8 @@ jlCall (JLFunc f) args = do
     callPtrs call fn xs = withMany withForeignPtr (map unwrap xs) $ \ptrs ->
                          callJulia call $ (argPtr fn):(map argPtr ptrs)
 
-jlBoxInt64' :: Int64 -> IO (Ptr ())
-jlBoxInt64' i = callJuliaUnsafe jl_box_int64 (retPtr retVoid) [argInt64 i]
+jlBoxInt64 :: Int64 -> IO JLVal
+jlBoxInt64 i = callJulia jl_box_int64 [argInt64 i]
 
 jlUnboxInt64' :: Ptr () -> IO Int64
 jlUnboxInt64' i = callJuliaUnsafe jl_unbox_int64 retInt64 [argPtr i]
@@ -218,3 +224,12 @@ jlUnboxVoidPtr' v = callJuliaUnsafe jl_unbox_voidpointer (retPtr retVoid) [argPt
 
 jlUnboxVoidPtr :: JLVal -> IO (Ptr ())
 jlUnboxVoidPtr (JLVal v) = withForeignPtr v (jlUnboxVoidPtr' . castPtr)
+
+-- | Make haskell data avaliable to Julia as a Ptr.
+-- The data is copied.
+-- TODO: allow references to haskell values to be passed
+-- TODO: there are currently two copies being done
+box :: Storable a => a -> String -> IO JLVal
+box x t = with x $ \p -> do
+  jv <- jlBoxVoidPtr $ castPtr p
+  jlCallFunction ("x -> unsafe_load(convert(Ptr{" ++ t ++ "}, x), 1)") [jv]
