@@ -1,0 +1,30 @@
+name:                inline-julia
+version:             0.1.0.0
+-- synopsis:
+-- description:
+license:             BSD3
+license-file:        LICENSE
+author:              Tristan Konolige
+maintainer:          tristan.konolige@gmail.com
+-- copyright:
+category:            Language
+build-type:          Simple
+extra-source-files:  ChangeLog.md
+cabal-version:       >=1.10
+
+library
+  exposed-modules:     Language.Inline.Julia
+                     , Language.Inline.Julia.InternalDynamic
+                     --, Language.Inline.Julia.InternalStatic
+  -- c-sources:           cbits/internal.c
+  -- extra-libraries:     julia
+  -- extra-lib-dirs:      /usr/local/lib/julia
+  -- cc-options:          -fPIC
+  build-depends:       base >=4.8 && <4.9
+                     , libffi
+                     , unix
+                     , template-haskell
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+  build-tools:         c2hs
+  -- ghc-options:         -threaded
