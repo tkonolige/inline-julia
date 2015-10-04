@@ -104,6 +104,12 @@ jl_call = unsafePerformIO $ dlsym libjulia "jl_call"
 {-# NOINLINE jl_call1 #-}
 jl_call1 = unsafePerformIO $ dlsym libjulia "jl_call1"
 
+{-# NOINLINE jl_call2 #-}
+jl_call2 = unsafePerformIO $ dlsym libjulia "jl_call2"
+
+{-# NOINLINE jl_call3 #-}
+jl_call3 = unsafePerformIO $ dlsym libjulia "jl_call3"
+
 {-# NOINLINE jl_box_voidpointer #-}
 jl_box_voidpointer = unsafePerformIO $ dlsym libjulia "jl_box_voidpointer"
 
@@ -173,28 +179,26 @@ jlGetFunction s = do
 
 jlCallFunction :: String -> [JLVal] -> IO JLVal
 jlCallFunction fn args = do
-  (JLFunc f) <- jlGetFunction fn
+  f <- jlGetFunction fn
+  jlCall f args
+
+-- | call a JLFunc with the given arguements
+jlCall :: JLFunc -> [JLVal] -> IO JLVal
+jlCall (JLFunc f) args = do
   withForeignPtr f $ \func ->
-    case args of -- TODO: ass call1 and call2 [] -> callJulia jl_call0 [argPtr func]
-      x:[] -> withForeignPtr (unwrap x) $ \p -> callJulia jl_call1 [argPtr func, argPtr p]
+    -- if the number of arguements is small, we use jl_call0-3
+    case args of
+      [] -> callJulia jl_call0 [argPtr func]
+      xs | length xs == 1 -> callPtrs jl_call1 func args
+      xs | length xs == 2 -> callPtrs jl_call2 func args
+      xs | length xs == 3 -> callPtrs jl_call3 func args
       _ -> withMany withForeignPtr (map unwrap args) $ \ptrs ->
              withArray ptrs $ \a ->
                callJulia jl_call [argPtr func, argPtr a, argInt32 (fromIntegral $ length args)]
   where
     unwrap (JLVal v) = v
-
-jlCall0' :: Ptr () -> IO (Ptr ())
-jlCall0' f = callJuliaUnsafe jl_call0 (retPtr retVoid) [argPtr f]
-
-jlCall0 :: JLFunc -> IO JLVal
-jlCall0 (JLFunc f) = withForeignPtr f (wrapGC . jlCall0' . castPtr)
-
-jlCall1' :: Ptr () -> Ptr () -> IO (Ptr ())
-jlCall1' f p = callJuliaUnsafe jl_call1 (retPtr retVoid) [argPtr f, argPtr p]
-
-jlCall1 :: JLFunc -> JLVal -> IO JLVal
-jlCall1 (JLFunc f) (JLVal v) = withForeignPtr f
-  (\p -> withForeignPtr v (\v' -> wrapGC $ jlCall1' (castPtr p) (castPtr v')))
+    callPtrs call fn xs = withMany withForeignPtr (map unwrap xs) $ \ptrs ->
+                         callJulia call $ (argPtr fn):(map argPtr ptrs)
 
 jlBoxInt64' :: Int64 -> IO (Ptr ())
 jlBoxInt64' i = callJuliaUnsafe jl_box_int64 (retPtr retVoid) [argInt64 i]

@@ -19,10 +19,7 @@ parseJulia s = withCString s $ \x -> do
   jlCallFunction "x -> parse(bytestring(convert(Ptr{Uint8}, x)))" [boxed]
 
 println :: JLVal -> IO ()
-println v = do
-  f <- jlGetFunction "println"
-  jlCall1 f v
-  return ()
+println v = jlCallFunction "println" [v] >> return ()
 
 -- | Parse a string for antiquotes ($()) and return them and a new string which
 -- is a julia function that takes the antiquotes as arguements
