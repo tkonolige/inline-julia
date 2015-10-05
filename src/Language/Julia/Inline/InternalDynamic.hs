@@ -1,4 +1,4 @@
-module Language.Inline.Julia.InternalDynamic where
+module Language.Julia.Inline.InternalDynamic where
 
 import Foreign.LibFFI
 import Foreign.Ptr

@@ -1,8 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
-module Language.Inline.Julia where
+module Language.Julia.Inline where
 
-import Language.Inline.Julia.InternalDynamic
+import Language.Julia.Inline.InternalDynamic
 import System.IO.Unsafe
 import Foreign.C.String
 import Foreign.Ptr
@@ -23,7 +23,7 @@ import Data.Maybe
 parseJulia :: String -> IO JLVal
 parseJulia s = withCString s $ \x -> do
   boxed <- jlBoxVoidPtr $ castPtr x
-  jlCallFunction "x -> parse(bytestring(convert(Ptr{Uint8}, x)))" [boxed]
+  jlCallFunction "x -> parse(bytestring(convert(Ptr{UInt8}, x)))" [boxed]
 
 println :: JLVal -> IO ()
 println v = jlCallFunction "println" [v] >> return ()
@@ -90,11 +90,7 @@ julia = QuasiQuoter { quoteExp = parseJulia' }
       p <- runIO $ E.try $ parseJulia $ mkJLFunc tks
       case p of
         Left (JuliaException e) -> fail $ showJL e
-        Right parsed -> do
-          mkCall tks
+        Right parsed -> mkCall tks
           -- return type, usually Any
           -- retType <- runIO $ jlGetFunction "x -> x.typ" >>= (\f -> jlCall1 f parsed)
           -- appE [| jlEvalString |] [| s |]
-
--- [julia| println($("hi")) |]
--- [julia| x :: ASCIIString -> println(x) |] "hi"

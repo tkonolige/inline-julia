@@ -13,8 +13,8 @@ extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     Language.Inline.Julia
-                     , Language.Inline.Julia.InternalDynamic
+  exposed-modules:     Language.Julia.Inline
+                     , Language.Julia.Inline.InternalDynamic
                      --, Language.Inline.Julia.InternalStatic
   -- c-sources:           cbits/internal.c
   -- extra-libraries:     julia
