@@ -28,4 +28,8 @@ function show(x)
   Base.unsafe_convert(Cstring, repr(x))
 end
 
+function finalize_hs(p)
+  ccall(:hs_free_stable_ptr, Void, (Ptr{Void},), pointer(p))
+end
+
 end
