@@ -6,6 +6,8 @@
 module Language.Julia.Inline.Marshal where
 
 import qualified Data.Vector.Storable.Mutable as VM
+import qualified Data.Vector.Storable as V
+import qualified Data.ByteString.Char8 as B
 import Data.Int
 import Data.Word
 import Foreign.Marshal
@@ -22,6 +24,8 @@ import System.IO.Unsafe
 
 import Language.Julia.Inline.InternalDynamic
 import Language.Julia.Inline.Quote
+
+-- TODO: create hsInt
 
 -- Make sure a JLVal lives for a scope
 withJLVal :: JLVal -> IO a -> IO a
@@ -150,6 +154,7 @@ jlDouble (JLVal i) = do
 
 -- The vector cannot be frozen before using this function
 -- The vector may be mutated by julia
+-- TODO: check size of type
 hsMVector :: Storable a => VM.IOVector a -> String -> IO JLVal
 hsMVector v typ = do
   sbPtr <- newStablePtr v
@@ -162,6 +167,13 @@ hsMVector v typ = do
     -- add the finalizer
     [julia| finalizer($(jl ja), x -> HaskellGC.finalize_hs($(jl jp))) |]
     return ja
+
+-- TODO: could just have julia manage the memory for us
+hsVector :: Storable a => V.Vector a -> String -> IO JLVal
+hsVector v typ = V.thaw v >>= \v' -> hsMVector v' typ
+
+hsList :: Storable a => [a] -> String -> IO JLVal
+hsList v typ = hsVector (V.fromList v) typ
 
 -- Do not freeze this vector until after julia is done using it
 -- The type of elements of the IOVector must match julia type
@@ -177,6 +189,12 @@ jlMVector jv@(JLVal v) = withForeignPtr v $ \p -> do
   let vec :: VM.IOVector Int8 = VM.unsafeFromForeignPtr (castForeignPtr v) offset (fromIntegral l * sizeOf (undefined :: a))
   return $ VM.unsafeCast vec
 
+jlVector :: Storable a => JLVal -> IO (V.Vector a)
+jlVector v = jlMVector v >>= V.freeze
+
+jlList :: Storable a => JLVal -> IO [a]
+jlList v = V.toList <$> jlVector v
+
 jlVoid :: JLVal -> IO ()
 jlVoid v = do
   [julia| @assert (typeof($(jl v)) == Void) "Return type is not Void" |]
@@ -186,6 +204,16 @@ jlString :: JLVal -> IO String
 jlString v = withJLVal v $ do
   p <- [julia| Base.unsafe_convert(Cstring, $(jl v)) |] >>= jlVoidPtr
   peekCString $ castPtr p
+
+-- TODO: unpack directly to bytestring
+-- TODO: dont copy
+jlByteString :: JLVal -> IO B.ByteString
+jlByteString v = B.pack <$> jlString v
+
+-- TODO: dont copy
+hsByteString :: B.ByteString -> IO JLVal
+hsByteString s = B.useAsCStringLen s $ \(cs, l) ->
+  [julia| bytestring(convert(Ptr{UInt8}, $(hsVoidPtr $ castPtr cs)), $(hsInt64 $ fromIntegral l)) |]
 
 jl :: JLVal -> IO JLVal
 jl = return

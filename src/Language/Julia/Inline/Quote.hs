@@ -82,6 +82,7 @@ julia = QuasiQuoter { quoteExp = parseJulia' }
 hsVoidPtr :: Ptr () -> IO JLVal
 hsVoidPtr i = callJulia jl_box_voidpointer [argPtr i]
 
+-- TODO: use CStringLen
 hsString :: String -> IO JLVal
 hsString s = withCString s $ \cs -> do
   js <- hsVoidPtr $ castPtr cs
