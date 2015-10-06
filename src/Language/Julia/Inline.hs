@@ -3,6 +3,8 @@
 module Language.Julia.Inline where
 
 import Language.Julia.Inline.InternalDynamic
+import Language.Julia.Inline.Marshal
+
 import System.IO.Unsafe
 import Foreign.C.String
 import Foreign.Ptr

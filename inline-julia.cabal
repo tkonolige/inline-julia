@@ -15,6 +15,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Language.Julia.Inline
                      , Language.Julia.Inline.InternalDynamic
+                     , Language.Julia.Inline.Marshal
                      --, Language.Inline.Julia.InternalStatic
   c-sources:           cbits/internal.c
   -- extra-libraries:     julia
