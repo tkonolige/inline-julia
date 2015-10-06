@@ -38,7 +38,7 @@ import Debug.Trace
 -- TODO: Storable types should be able to be managed with julia's gc using stableptr
 
 data JuliaException = JuliaException JLVal deriving (Show)
-data RawJuliaException = RawJuliaException (Ptr ()) deriving (Show)
+data RawJuliaException = RawJuliaException (Ptr JLVal) deriving (Show)
 instance Exception JuliaException
 instance Exception RawJuliaException
 
@@ -66,7 +66,7 @@ callJuliaUnsafe f ret args = withMVar juliaLock $ const $ do
     -- tmp <- callFFI jl_eval_string (retPtr retVoid) [argString "print"]
     -- callFFI jl_call1 (retPtr retVoid) [argPtr tmp, argPtr e]
     -- callFFI jl_eval_string (retPtr retVoid) [argString "println(sprint(io->Base.show_backtrace(io, backtrace())))"]
-    throw $ RawJuliaException e
+    throw $ RawJuliaException $ castPtr e
   return x
 
 -- call a julia c function and retain a reference to its result
@@ -74,7 +74,7 @@ callJulia :: FunPtr c -> [Arg] -> IO JLVal
 callJulia a b = do
   x <- handle f $ callJuliaUnsafe a (retPtr retVoid) b
   -- TODO: check if result is null and dont push gc
-  jlGCPush x
+  jlGCPush $ castPtr x
   where
     f :: RawJuliaException -> IO a
     f (RawJuliaException e) = jlGCPush e >>= throw . JuliaException
@@ -92,7 +92,7 @@ instance Show JLModule where
 showJL :: JLVal -> String
 showJL v = unsafePerformIO $ do
   rep <- jlCallFunction "HaskellGC.show" [v]
-  sPtr <- jlUnboxVoidPtr rep
+  sPtr <- jlVoidPtr rep
   peekCString $ castPtr sPtr
 
 -- julia library and function ptrs. We cache them for performance
@@ -163,7 +163,7 @@ jlGCPop i = do
 
 -- TODO: do we need to call GCPush before hand?
 -- | The pointer passed in should not be used after this
-jlGCPush :: Ptr () -> IO JLVal
+jlGCPush :: Ptr JLVal -> IO JLVal
 jlGCPush p = do
   retain <- callJuliaUnsafe jl_eval_string (retPtr retVoid) [argString "HaskellGC.retain"]
   i <- callJuliaUnsafe jl_call1 (retPtr retVoid) [argPtr retain, argPtr p]
@@ -171,9 +171,6 @@ jlGCPush p = do
   fp <- newForeignPtr_ (castPtr p)
   addForeignPtrConcFinalizer fp (jlGCPop i')
   return $ JLVal fp
-
-wrapGC :: IO (Ptr ()) -> IO JLVal
-wrapGC a = a >>= jlGCPush
 
 -- jlGCPush :: JL a => a -> IO ()
 -- jlGCPush = do
@@ -213,7 +210,8 @@ jlCall (JLFunc f) args = do
     callPtrs call fn xs = withMany withForeignPtr (map unwrap xs) $ \ptrs ->
                          callJulia call $ (argPtr fn):(map argPtr ptrs)
 
-jlUnboxVoidPtr :: JLVal -> IO (Ptr ())
-jlUnboxVoidPtr (JLVal v) = withForeignPtr v (jlUnboxVoidPtr' . castPtr)
+-- included in this file because it is needed by jlShow
+jlVoidPtr :: JLVal -> IO (Ptr ())
+jlVoidPtr (JLVal v) = withForeignPtr v (jlUnboxVoidPtr' . castPtr)
   where
     jlUnboxVoidPtr' v = callJuliaUnsafe jl_unbox_voidpointer (retPtr retVoid) [argPtr v]
