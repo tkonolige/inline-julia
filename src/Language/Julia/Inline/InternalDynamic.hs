@@ -51,7 +51,7 @@ newtype JLModule = JLModule (ForeignPtr JLModule)
 {-# NOINLINE juliaLock #-}
 juliaLock :: MVar ()
 juliaLock = unsafePerformIO $ do
-  jlInit "/Applications/Julia-0.4.0-rc3.app/Contents/Resources/julia/libexec"
+  jlInit $ Just "/usr/local/lib/" -- TODO: automatically find
   newMVar ()
 
 -- TODO: this lock could deadlock...
@@ -141,13 +141,17 @@ jl_unbox_int64 = unsafePerformIO $ dlsym libjulia "jl_unbox_int64"
 foreign import ccall "atexit" atexit :: FunPtr () -> IO ()
 
 -- | Initializes julia runtime and sets up garbage collector
-jlInit :: FilePath -> IO ()
+jlInit :: Maybe FilePath -> IO ()
 jlInit s = do
   -- load dynamic lib
   jl_init <- dlsym libjulia "jl_init"
-  callFFI jl_init retVoid [argString s] -- TODO: check for exception?
+  case s of
+    Just s' -> callFFI jl_init retVoid [argString s'] -- TODO: check for exception?
+    Nothing -> callFFI jl_init retVoid [argPtr nullPtr]
+  -- TODO: inline this file here? jl_load_file_string?
+  callFFI jl_eval_string (retPtr retVoid) [argString "push!(LOAD_PATH, \"./julia\")"]
   -- set up global array to hold haskell references to julia
-  callFFI jl_eval_string (retPtr retVoid) [argString "require(\"julia/gc.jl\")"]
+  callFFI jl_eval_string (retPtr retVoid) [argString "import HaskellGC"]
   -- Install julia's atexit hook
   -- jl_atexit_hook <- dlsym libjulia "jl_atexit_hook"
   -- atexit jl_atexit_hook
