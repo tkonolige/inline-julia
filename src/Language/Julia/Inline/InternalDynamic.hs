@@ -149,12 +149,11 @@ jlInit s = do
     Just s' -> callFFI jl_init retVoid [argString s'] -- TODO: check for exception?
     Nothing -> callFFI jl_init retVoid [argPtr nullPtr]
   -- TODO: inline this file here? jl_load_file_string?
-  callFFI jl_eval_string (retPtr retVoid) [argString "push!(LOAD_PATH, \"./julia\")"]
   -- set up global array to hold haskell references to julia
-  callFFI jl_eval_string (retPtr retVoid) [argString "import HaskellGC"]
+  callFFI jl_eval_string (retPtr retVoid) [argString "push!(LOAD_PATH, \"./julia\"); import HaskellGC"]
   -- Install julia's atexit hook
-  -- jl_atexit_hook <- dlsym libjulia "jl_atexit_hook"
-  -- atexit jl_atexit_hook
+  jl_atexit_hook <- dlsym libjulia "jl_atexit_hook"
+  atexit jl_atexit_hook
   return ()
 
 -- TODO: fix int64, should be platform dependant
