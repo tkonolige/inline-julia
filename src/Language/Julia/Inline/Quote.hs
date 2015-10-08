@@ -29,24 +29,25 @@ parseJulia s = do
 println :: JLVal -> IO ()
 println v = jlCallFunction "println" [v] >> return ()
 
--- | Parse a string for antiquotes ($()) and return them and a new string which
--- is a julia function that takes the antiquotes as arguements
-parseAntiQuote :: String -> ([a], String)
-parseAntiQuote input = undefined
-
 -- TODO: better error messages
-data Token = TString String
+data Token = TString Char
            | TPat String
            -- | TMarshal String String
            deriving (Eq, Show)
 
-parser :: Parsec String [Token]
-parser = do
-  r <- many $ antiquote <|>
-    TString <$> someTill anyChar (eof <|> ((lookAhead $ string "$(") >> return ()))
-  eof
-  return r
-antiquote = between (string "$(") (char ')') $ TPat <$> many (satisfy (/=')'))
+-- Parser for quasiquote string
+antiquoter :: Parsec String [Token]
+antiquoter = many (P.try antiquote <|> (TString <$> anyChar)) <* eof
+  where
+    antiquote = string "$(" *> (TPat <$> (concat <$> many parens)) <* char ')'
+    parens =  (P.try $ do
+      p1 <- char '('
+      m <- optional $ many parens
+      p2 <- char ')'
+      case m of
+        Just m' -> return $ p1:(concat m') ++ [p2]
+        Nothing -> return $ p1:[p2]
+      ) <|> some (noneOf "()")
 
 mkCall :: [Token] -> ExpQ
 mkCall ts = [| sequence $(listE vars) >>= $(callFunc) |]
@@ -64,7 +65,7 @@ mkJLFunc ts = "(" ++ intercalate "," args ++ ") -> " ++ body
     (args, body) = go ts 0
     go [] i = ([], [])
     go ((TString s):xs) i = let (a, x) = go xs i
-                             in (a, s ++ x)
+                             in (a, s:x)
     go ((TPat _):xs) i = let (a, x) = go xs (i+1)
                              arg = "__hs_" ++ show i
                           in (arg : a, arg ++ x)
@@ -73,7 +74,7 @@ julia :: QuasiQuoter
 julia = QuasiQuoter { quoteExp = parseJulia' }
   where
     parseJulia' s = do
-      let Right tks = parse parser "" s
+      let Right tks = parse antiquoter "" s
       p <- runIO $ E.try $ parseJulia $ mkJLFunc tks
       case p of
         Left (JuliaException e) -> fail $ showJL e

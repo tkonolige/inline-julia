@@ -2,6 +2,8 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Language.Julia.Inline.Marshal where
 
@@ -26,6 +28,52 @@ import Language.Julia.Inline.InternalDynamic
 import Language.Julia.Inline.Quote
 
 -- TODO: create hsInt
+
+-- | Type class to determine haskell representation of type
+class JLConvertable a where
+  jlType :: a -> String
+
+instance JLConvertable Int8 where
+  jlType _ = "Int8"
+
+instance JLConvertable Int16 where
+  jlType _ = "Int16"
+
+instance JLConvertable Int32 where
+  jlType _ = "Int32"
+
+instance JLConvertable Int64 where
+  jlType _ = "Int64"
+
+instance JLConvertable Word8 where
+  jlType _ = "Word8"
+
+instance JLConvertable Word16 where
+  jlType _ = "Word16"
+
+instance JLConvertable Word32 where
+  jlType _ = "Word32"
+
+instance JLConvertable Word64 where
+  jlType _ = "Word64"
+
+instance JLConvertable CString where
+  jlType _ = "Cstring"
+
+instance JLConvertable B.ByteString where
+  jlType _ = "ASCIIString" -- TODO: maybe Vector{UInt8}?
+
+instance JLConvertable String where
+  jlType _ = "ASCIIString"
+
+instance JLConvertable a => JLConvertable (VM.IOVector a) where
+  jlType _ = "Vector{" ++ jlType (undefined :: a) ++ "}"
+
+instance JLConvertable a => JLConvertable (V.Vector a) where
+  jlType _ = "Vector{" ++ jlType (undefined :: a) ++ "}"
+
+instance JLConvertable a => JLConvertable [a] where
+  jlType _ = "Vector{" ++ jlType (undefined :: a) ++ "}"
 
 -- Make sure a JLVal lives for a scope
 withJLVal :: JLVal -> IO a -> IO a
@@ -155,13 +203,13 @@ jlDouble (JLVal i) = do
 -- The vector cannot be frozen before using this function
 -- The vector may be mutated by julia
 -- TODO: check size of type
-hsMVector :: Storable a => VM.IOVector a -> String -> IO JLVal
-hsMVector v typ = do
+hsMVector :: forall a. (Storable a, JLConvertable a) => VM.IOVector a -> IO JLVal
+hsMVector v = do
   sbPtr <- newStablePtr v
   let (fp, l) = VM.unsafeToForeignPtr0 v
   withForeignPtr fp $ \p -> do
     -- box the array and turn it into a julia array
-    ja <- [julia| pointer_to_array(convert(Ptr{$(hsType typ)}, $(hsVoidPtr $ castPtr p)), ($(hsInt64 $ fromIntegral l),))|]
+    ja <- [julia| pointer_to_array(convert(Ptr{$(hsType (undefined :: a))}, $(hsVoidPtr $ castPtr p)), ($(hsInt64 $ fromIntegral l),))|]
     -- box the free pointer
     jp <- hsVoidPtr $ castStablePtrToPtr sbPtr
     -- add the finalizer
@@ -169,30 +217,34 @@ hsMVector v typ = do
     return ja
 
 -- TODO: could just have julia manage the memory for us
-hsVector :: Storable a => V.Vector a -> String -> IO JLVal
-hsVector v typ = V.thaw v >>= \v' -> hsMVector v' typ
+hsVector :: (Storable a, JLConvertable a) => V.Vector a -> IO JLVal
+hsVector v = V.thaw v >>= \v' -> hsMVector v'
 
-hsList :: Storable a => [a] -> String -> IO JLVal
-hsList v typ = hsVector (V.fromList v) typ
+hsList :: (Storable a, JLConvertable a) => [a] -> IO JLVal
+hsList v = hsVector (V.fromList v)
 
 -- Do not freeze this vector until after julia is done using it
 -- The type of elements of the IOVector must match julia type
 -- The a passed in is to determine sizeof elements
 -- TODO: check types
-jlMVector :: forall a. Storable a => JLVal -> IO (VM.IOVector a)
-jlMVector jv@(JLVal v) = withForeignPtr v $ \p -> do
-  l <- [julia| length($(jl jv)) |] >>= jlInt64
-  let dp :: Ptr a = jl_array_data1 p
-  -- we calculate offset using bytes
-  let offset = (castPtr dp :: Ptr Int8) `minusPtr` (castPtr p)
-  -- we dont need to retain the vector because MVector does it for us
-  let vec :: VM.IOVector Int8 = VM.unsafeFromForeignPtr (castForeignPtr v) offset (fromIntegral l * sizeOf (undefined :: a))
-  return $ VM.unsafeCast vec
+-- TODO: unsafe version that doesnt convert
+jlMVector :: forall a. (Storable a, JLConvertable a) => JLVal -> IO (VM.IOVector a)
+jlMVector jv = do
+  -- convert return type to right format
+  ja@(JLVal v) <- [julia| convert($(hsType (undefined :: VM.IOVector a)), $(jl jv)) |]
+  withForeignPtr v $ \p -> do
+    l <- [julia| length($(jl ja)) |] >>= jlInt64
+    let dp :: Ptr a = jl_array_data1 p
+    -- we calculate offset using bytes
+    let offset = (castPtr dp :: Ptr Int8) `minusPtr` (castPtr p)
+    -- we dont need to retain the vector because MVector does it for us
+    let vec :: VM.IOVector Int8 = VM.unsafeFromForeignPtr (castForeignPtr v) offset (fromIntegral l * sizeOf (undefined :: a))
+    return $ VM.unsafeCast vec
 
-jlVector :: Storable a => JLVal -> IO (V.Vector a)
+jlVector :: (Storable a, JLConvertable a) => JLVal -> IO (V.Vector a)
 jlVector v = jlMVector v >>= V.freeze
 
-jlList :: Storable a => JLVal -> IO [a]
+jlList :: (Storable a, JLConvertable a) => JLVal -> IO [a]
 jlList v = V.toList <$> jlVector v
 
 jlVoid :: JLVal -> IO ()
@@ -218,9 +270,11 @@ hsByteString s = B.useAsCStringLen s $ \(cs, l) ->
 jl :: JLVal -> IO JLVal
 jl = return
 
-hsType :: String -> IO JLVal
-hsType s = do
-  jlCallFunction s []
+hsType :: JLConvertable a => a -> IO JLVal
+hsType x = jlEvalString $ jlType x
+
+hsTypeLit :: String -> IO JLVal
+hsTypeLit s = jlEvalString s
 
 -- jl_array_data is a macro
 foreign import ccall unsafe "jl_array_data1" jl_array_data1 :: Ptr JLVal -> Ptr a
