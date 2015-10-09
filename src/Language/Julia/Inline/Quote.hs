@@ -1,6 +1,13 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
-module Language.Julia.Inline.Quote where
+
+{-| A QuasiQuoter for generating callable Julia functions in Haskell.
+-}
+module Language.Julia.Inline.Quote (
+   julia
+ , hsVoidPtr
+ , hsString
+ ) where
 
 import Language.Julia.Inline.InternalDynamic
 
@@ -26,13 +33,9 @@ parseJulia s = do
   boxed <- hsString s
   jlCallFunction "parse" [boxed]
 
-println :: JLVal -> IO ()
-println v = jlCallFunction "println" [v] >> return ()
-
 -- TODO: better error messages
 data Token = TString Char
            | TPat String
-           -- | TMarshal String String
            deriving (Eq, Show)
 
 -- Parser for quasiquote string
@@ -70,8 +73,25 @@ mkJLFunc ts = "(" ++ intercalate "," args ++ ") -> " ++ body
                              arg = "__hs_" ++ show i
                           in (arg : a, arg ++ x)
 
+-- | A 'QuasiQuoter' for Julia functions, arguments are passed in with @$()@.
+-- Arguments provided must be of type 'IO'
+-- 'Language.Julia.Inline.InternalDynamic.JLVal'. Look in
+-- "Language.Julia.Inline.Marshal" for marshaling data to and from Julia.
+--
+-- A couple examples:
+--
+-- >> [julia| println($(hsString "Hello World")) |]
+-- > Hello World
+-- > julia: nothing
+--
+-- >> [julia| 1 + $(hsInt64 2) |]
+-- > julia: 3
 julia :: QuasiQuoter
-julia = QuasiQuoter { quoteExp = parseJulia' }
+julia = QuasiQuoter { quoteExp = parseJulia'
+                    , quotePat = fail "not implemented"
+                    , quoteType = fail "not implemented"
+                    , quoteDec = fail "not implemented"
+                    }
   where
     parseJulia' s = do
       let Right tks = parse antiquoter "" s
@@ -80,10 +100,13 @@ julia = QuasiQuoter { quoteExp = parseJulia' }
         Left (JuliaException e) -> fail $ showJL e
         Right parsed -> mkCall tks
 
+-- TODO: these should really not be here
+-- | Box a 'Ptr' @()@ and pass it to Julia
 hsVoidPtr :: Ptr () -> IO JLVal
 hsVoidPtr i = callJulia jl_box_voidpointer [argPtr i]
 
 -- TODO: use CStringLen
+-- | Box a 'String' and pass it to Julia
 hsString :: String -> IO JLVal
 hsString s = withCString s $ \cs -> do
   js <- hsVoidPtr $ castPtr cs

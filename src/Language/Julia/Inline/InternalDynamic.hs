@@ -1,5 +1,29 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-module Language.Julia.Inline.InternalDynamic where
+
+{-| A set of low-level bindings to the Julia runtime.
+
+-}
+module Language.Julia.Inline.InternalDynamic (
+  -- * Memory management
+  -- $mem
+
+  -- * Julia Datatypes
+    JuliaException(..)
+  , JLVal(..)
+  , JLFunc(..)
+  -- * Julia's C-interface
+  , libjulia
+  , jl_box_voidpointer
+  , jl_box_int64
+  , jl_unbox_int64
+  -- * Prmitive functions
+  , callJulia
+  , callJuliaUnsafe
+  , jlVoidPtr
+  , jlCallFunction
+  , jlEvalString
+  , showJL
+  ) where
 
 import Foreign.LibFFI
 import Foreign.Ptr
@@ -20,33 +44,58 @@ import Data.Int
 import Data.Word
 import Control.Concurrent.MVar
 
-import Debug.Trace
+{- $mem
+   Memory management when briding the gap between julia and haskell is a
+   little interesting. All julia functions which return a pointer require that
+   said pointer be retained in some way before the next call to julia. We
+   create a global julia array to hold references to all data that haskell has.
+   On the haskell side, julia pointers a wrapped with a ForeignPtr that that
+   removes the object from the array when it is gc'd in haskell.
 
+   Passing Haskell values to julia is a little more complicated. If the data we
+   are passing is not Storable, then we call a marshaller to generate data
+   which julia then copies and manages. If the data is mutable, then we pass
+   julia the data directy from a pointer and julia copies it.
+-}
+
+-- As of GHC 7.10.2 linking against libjulia at runtime does not work. See https://ghc.haskell.org/trac/ghc/ticket/10458.
+-- Instead we use dlopen and friends
 -- TODO: precompile julia functions
--- TODO: memory management
--- | memory management when briding the gap between julia and haskell is a
--- little interesting. All julia functions which return a pointer require that
--- said pointer be retained in some way before the next call to julia. We
--- create a global julia array to hold references to all data that haskell has.
--- On the haskell side, julia pointers a wrapped with a ForeignPtr that that
--- removes the object from the array when it is gc'd in haskell.
---
--- Passing Haskell values to julia is a little more complicated. If the data we
--- are passing is not Storable, then we call a marshaller to generate data
--- which julia then copies and manages. If the data is mutable, then we pass
--- julia the data directy from a pointer and julia copies it.
--- TODO: Storable types should be able to be managed with julia's gc using stableptr
 
+-- | A exception thrown by Julia; wraps a Julia object.
 data JuliaException = JuliaException JLVal deriving (Show)
-data RawJuliaException = RawJuliaException (Ptr JLVal) deriving (Show)
 instance Exception JuliaException
+
+data RawJuliaException = RawJuliaException (Ptr JLVal) deriving (Show)
 instance Exception RawJuliaException
 
+-- | A Julia value
 newtype JLVal = JLVal (ForeignPtr JLVal)
-newtype JLFunc = JLFunc (ForeignPtr JLFunc)
-newtype JLModule = JLModule (ForeignPtr JLModule)
 
--- | The julia runtime is not threadsafe. This global lock makes sure we don't
+-- | A Julia function
+newtype JLFunc = JLFunc (ForeignPtr JLFunc)
+
+instance Show JLVal where
+  show v = "julia: " ++ showJL v
+
+instance Show JLFunc where
+  show (JLFunc p) = "julia: " ++ (showJL $ JLVal $ castForeignPtr p)
+
+-- TODO: noinline?
+-- | Show for Julia values
+showJL :: JLVal -> String
+showJL v = unsafePerformIO $ do
+  js <- jlCallFunction "HaskellGC.show" [v]
+  vp <- jlVoidPtr js
+  peekCString $ castPtr vp
+
+-- | Get a raw pointer to a Julia object. Use with caution.
+jlVoidPtr :: JLVal -> IO (Ptr ())
+jlVoidPtr (JLVal v) = withForeignPtr v (jlUnboxVoidPtr' . castPtr)
+  where
+    jlUnboxVoidPtr' v = callJuliaUnsafe jl_unbox_voidpointer (retPtr retVoid) [argPtr v]
+
+-- | The Julia runtime is not threadsafe. This global lock makes sure we don't
 -- access concurrently
 {-# NOINLINE juliaLock #-}
 juliaLock :: MVar ()
@@ -55,7 +104,8 @@ juliaLock = unsafePerformIO $ do
   newMVar ()
 
 -- TODO: this lock could deadlock...
--- this function is unsafe because it does not retain julia values
+-- | Call a Julia c-interface function. Checks exceptions thrown by Julia.
+-- Values returned by this function are not managed by the garbage collector
 callJuliaUnsafe :: FunPtr c -> RetType a -> [Arg] -> IO a
 callJuliaUnsafe f ret args = withMVar juliaLock $ const $ do
   x <- callFFI f ret args
@@ -69,7 +119,8 @@ callJuliaUnsafe f ret args = withMVar juliaLock $ const $ do
     throw $ RawJuliaException $ castPtr e
   return x
 
--- call a julia c function and retain a reference to its result
+-- | Call a Julia c-interface function and make the result be managed by the
+-- garbage collector
 callJulia :: FunPtr c -> [Arg] -> IO JLVal
 callJulia a b = do
   x <- handle f $ callJuliaUnsafe a (retPtr retVoid) b
@@ -79,24 +130,9 @@ callJulia a b = do
     f :: RawJuliaException -> IO a
     f (RawJuliaException e) = jlGCPush e >>= throw . JuliaException
 
-instance Show JLVal where
-  show v = "julia: " ++ showJL v
-
-instance Show JLFunc where
-  show (JLFunc p) = "julia: " ++ (showJL $ JLVal $ castForeignPtr p)
-
-instance Show JLModule where
-  show (JLModule p) = "julia: " ++ (showJL $ JLVal $ castForeignPtr p)
-
--- TODO: noinline?
-showJL :: JLVal -> String
-showJL v = unsafePerformIO $ do
-  rep <- jlCallFunction "HaskellGC.show" [v]
-  sPtr <- jlVoidPtr rep
-  peekCString $ castPtr sPtr
-
 -- julia library and function ptrs. We cache them for performance
 
+-- | The Julia library. Dynamically loaded at runtime because it requires RTLD_GLOBAL. This library is not thread safe.
 {-# NOINLINE libjulia #-}
 libjulia = unsafePerformIO $ dlopen "libjulia.dylib" [RTLD_NOW, RTLD_GLOBAL]
 
@@ -118,11 +154,13 @@ jl_call2 = unsafePerformIO $ dlsym libjulia "jl_call2"
 {-# NOINLINE jl_call3 #-}
 jl_call3 = unsafePerformIO $ dlsym libjulia "jl_call3"
 
+-- | Julia C funtion to box a 'Ptr ()'. Used a primitive for boxing datatypes.
 {-# NOINLINE jl_box_voidpointer #-}
 jl_box_voidpointer = unsafePerformIO $ dlsym libjulia "jl_box_voidpointer"
 
 {-# NOINLINE jl_unbox_voidpointer #-}
 jl_unbox_voidpointer = unsafePerformIO $ dlsym libjulia "jl_unbox_voidpointer"
+
 {-# NOINLINE jl_exception_occurred #-}
 jl_exception_occurred = unsafePerformIO $ dlsym libjulia "jl_exception_occurred"
 
@@ -132,9 +170,11 @@ jl_gc_add_finalizer = unsafePerformIO $ dlsym libjulia "jl_gc_add_finalizer"
 {-# NOINLINE jl_array_data #-}
 jl_array_data = unsafePerformIO $ dlsym Default "jl_array_data1"
 
+-- | Julia C function to box an 'Int64'
 {-# NOINLINE jl_box_int64 #-}
 jl_box_int64 = unsafePerformIO $ dlsym libjulia "jl_box_int64"
 
+-- | Julia C function to unbox an 'Int64'
 {-# NOINLINE jl_unbox_int64 #-}
 jl_unbox_int64 = unsafePerformIO $ dlsym libjulia "jl_unbox_int64"
 
@@ -178,6 +218,7 @@ jlGCPush p = do
 -- jlGCPush :: JL a => a -> IO ()
 -- jlGCPush = do
 
+-- | Evaluate a 'String' in Julia.
 jlEvalString :: String -> IO JLVal
 jlEvalString s = callJulia jl_eval_string [argString s]
 
@@ -190,6 +231,8 @@ jlGetFunction s = do
   JLVal v <- jlEvalString s
   return $ JLFunc $ castForeignPtr v
 
+-- | Call a Julia function with the given arguements. Arguement lengths must
+-- match.
 jlCallFunction :: String -> [JLVal] -> IO JLVal
 jlCallFunction fn args = do
   f <- jlGetFunction fn
@@ -212,9 +255,3 @@ jlCall (JLFunc f) args = do
     unwrap (JLVal v) = v
     callPtrs call fn xs = withMany withForeignPtr (map unwrap xs) $ \ptrs ->
                          callJulia call $ (argPtr fn):(map argPtr ptrs)
-
--- included in this file because it is needed by jlShow
-jlVoidPtr :: JLVal -> IO (Ptr ())
-jlVoidPtr (JLVal v) = withForeignPtr v (jlUnboxVoidPtr' . castPtr)
-  where
-    jlUnboxVoidPtr' v = callJuliaUnsafe jl_unbox_voidpointer (retPtr retVoid) [argPtr v]
