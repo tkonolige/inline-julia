@@ -25,6 +25,7 @@ module Language.Julia.Inline.Marshal (
   , hsType
   , hsTypeLit
   , hsByteString
+  , hsLazyByteString
   , jl
   -- * Converting Julia values into Haskell values
   , jlInt64
@@ -43,11 +44,14 @@ module Language.Julia.Inline.Marshal (
   , jlVoid
   , jlString
   , jlByteString
+  , jlLazyByteString
   ) where
 
 import qualified Data.Vector.Storable.Mutable as VM
 import qualified Data.Vector.Storable as V
-import qualified Data.ByteString.Char8 as B
+import qualified Data.ByteString as B
+import Data.ByteString.Unsafe
+import qualified Data.ByteString.Lazy as BL
 import Data.Int
 import Data.Word
 import Foreign.Marshal
@@ -69,8 +73,8 @@ import Language.Julia.Inline.Quote
 
 -- | Type class to determine the name of a Haskell type in Julia
 class JLConvertable a where
-  jlType :: a -- ^ @a@ is not used
-         -> String
+  jlType :: a      -- ^ @a@ is not used
+         -> String -- ^ 'String' represemtation of Julia type
 
 instance JLConvertable Int8 where
   jlType _ = "Int8"
@@ -117,6 +121,16 @@ instance JLConvertable a => JLConvertable [a] where
 -- | Make sure a JLVal lives for a scope
 withJLVal :: JLVal -> IO a -> IO a
 withJLVal (JLVal v) a = withForeignPtr v $ const a
+
+-- | Manage a Haskell value with the Julia GC
+juliaGC :: a -> JLVal -> IO ()
+juliaGC x jx = do
+  sbPtr <- newStablePtr x
+  -- box the stable ptr
+  jp <- hsVoidPtr $ castStablePtrToPtr sbPtr
+  -- add the finalizer
+  [julia| finalizer($(jl jx), x -> HaskellGC.finalize_hs($(jl jp))) |] >>= jlVoid
+  return ()
 
 {-# NOINLINE jl_box_int32 #-}
 jl_box_int32 = unsafePerformIO $ dlsym libjulia "jl_box_int32"
@@ -214,18 +228,13 @@ hsDouble i = callJulia jl_box_float64 [argCDouble $ CDouble i]
 -- vector may be mutated by julia.
 hsMVector :: forall a. (Storable a, JLConvertable a) => VM.IOVector a -> IO JLVal
 hsMVector v = do
-  sbPtr <- newStablePtr v
   let (fp, l) = VM.unsafeToForeignPtr0 v
   withForeignPtr fp $ \p -> do
     -- box the array and turn it into a julia array
     ja <- [julia| pointer_to_array(convert(Ptr{$(hsType (undefined :: a))}, $(hsVoidPtr $ castPtr p)), ($(hsInt64 $ fromIntegral l),))|]
-    -- box the free pointer
-    jp <- hsVoidPtr $ castStablePtrToPtr sbPtr
-    -- add the finalizer
-    [julia| finalizer($(jl ja), x -> HaskellGC.finalize_hs($(jl jp))) |]
+    juliaGC v ja
     return ja
 
--- TODO: could just have julia manage the memory for us
 -- | Clone a 'V.Vector' and pass it to Julia.
 hsVector :: (Storable a, JLConvertable a) => V.Vector a -> IO JLVal
 hsVector v = V.thaw v >>= \v' -> hsMVector v'
@@ -233,11 +242,16 @@ hsVector v = V.thaw v >>= \v' -> hsMVector v'
 hsList :: (Storable a, JLConvertable a) => [a] -> IO JLVal
 hsList v = hsVector (V.fromList v)
 
--- TODO: use underlying memory
 -- | Clone a 'B.ByteString' and pass it to Julia.
 hsByteString :: B.ByteString -> IO JLVal
-hsByteString s = B.useAsCStringLen s $ \(cs, l) ->
-  [julia| bytestring(convert(Ptr{UInt8}, $(hsVoidPtr $ castPtr cs)), $(hsInt64 $ fromIntegral l)) |]
+hsByteString s = unsafeUseAsCStringLen s $ \(cs, l) -> do
+  jb <- [julia| bytestring(convert(Ptr{UInt8}, $(hsVoidPtr $ castPtr cs)), $(hsInt64 $ fromIntegral l)) |]
+  juliaGC s jb
+  return jb
+
+-- | Clone a lazy 'BL.ByteString' and pass it to Julia.
+hsLazyByteString :: BL.ByteString -> IO JLVal
+hsLazyByteString s = hsByteString $ BL.toStrict s
 
 -- | Get the type representation of a Haskell object in Julia.
 hsType :: JLConvertable a => a -> IO JLVal
@@ -323,10 +337,15 @@ jlString v = withJLVal v $ do
   p <- [julia| Base.unsafe_convert(Cstring, $(jl v)) |] >>= jlVoidPtr
   peekCString $ castPtr p
 
--- TODO: unpack directly to bytestring
--- TODO: dont copy
 jlByteString :: JLVal -> IO B.ByteString
-jlByteString v = B.pack <$> jlString v
+jlByteString v = withJLVal v $ do
+  l <- [julia| length($(jl v)) |] >>= jlInt64
+  jp@(JLVal jp') <- [julia| Base.unsafe_convert(Cstring, $(jl v)) |]
+  p <- jlVoidPtr jp
+  unsafePackCStringFinalizer (castPtr p) (fromIntegral l) (touchForeignPtr jp')
+
+jlLazyByteString :: JLVal -> IO BL.ByteString
+jlLazyByteString v = BL.fromStrict <$> jlByteString v
 
 -- jl_array_data is a macro
 foreign import ccall unsafe "jl_array_data1" jl_array_data1 :: Ptr JLVal -> Ptr a
