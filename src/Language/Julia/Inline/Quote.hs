@@ -34,8 +34,10 @@ import           Data.Maybe
 -- | Type class to determine the name of a Haskell type in Julia
 class JLConvertable a where
   jlType :: a      -- ^ @a@ is not used
-         -> String -- ^ 'String' represemtation of Julia type
-  toJL :: a -> IO JLVal -- | convert @a@ to a Julia value
+         -> String -- ^ 'String' representation of Julia type
+
+  -- | convert @a@ to a Julia value
+  toJL :: a -> IO JLVal
 
 
 parseJulia :: String -> IO JLVal
