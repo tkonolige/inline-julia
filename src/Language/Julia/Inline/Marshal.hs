@@ -13,10 +13,13 @@ module Language.Julia.Inline.Marshal (
   , hsInt32
   , hsInt16
   , hsInt8
+  , hsInt
   , hsWord64
   , hsWord32
   , hsWord16
   , hsWord8
+  , hsWord
+  , hsCSize
   , hsFloat
   , hsDouble
   , hsMVector
@@ -32,10 +35,13 @@ module Language.Julia.Inline.Marshal (
   , jlInt32
   , jlInt16
   , jlInt8
+  , jlInt
   , jlWord64
   , jlWord32
   , jlWord16
   , jlWord8
+  , jlWord
+  , jlCSize
   , jlFloat
   , jlDouble
   , jlMVector
@@ -47,6 +53,7 @@ module Language.Julia.Inline.Marshal (
   , jlLazyByteString
   ) where
 
+import Data.Bits
 import qualified Data.ByteString              as B
 import qualified Data.ByteString.Lazy         as BL
 import           Data.ByteString.Unsafe
@@ -69,7 +76,21 @@ import           System.Posix.DynamicLinker
 import           Language.Julia.Inline.InternalDynamic
 import           Language.Julia.Inline.Quote
 
--- TODO: create hsInt
+instance JLConvertable JLVal where
+  jlType _ = "Any"
+  toJL = jl
+
+instance JLConvertable Int where
+  jlType _ = "Int"
+  toJL = hsInt
+
+instance JLConvertable Word where
+  jlType _ = "Word"
+  toJL = hsWord
+
+instance JLConvertable CSize where
+  jlType _ = "CSize"
+  toJL = hsCSize
 
 instance JLConvertable Int8 where
   jlType _ = "Int8"
@@ -204,6 +225,21 @@ jl_ptr_to_array_1d = unsafePerformIO $ dlsym libjulia "jl_ptr_to_array_1d"
 
 -- * Converting Haskell values into Julia values
 
+hsInt :: Int -> IO JLVal
+hsInt i = case finiteBitSize i of
+            64 -> hsInt64 $ fromIntegral i
+            32 -> hsInt32 $ fromIntegral i
+
+hsWord :: Word -> IO JLVal
+hsWord i = case finiteBitSize i of
+            64 -> hsWord64 $ fromIntegral i
+            32 -> hsWord32 $ fromIntegral i
+
+hsCSize :: CSize -> IO JLVal
+hsCSize i = case finiteBitSize i of
+            64 -> hsWord64 $ fromIntegral i
+            32 -> hsWord32 $ fromIntegral i
+
 hsInt64 :: Int64 -> IO JLVal
 hsInt64 i = callJulia jl_box_int64 [argInt64 i]
 
@@ -283,6 +319,21 @@ jl = return
 
 
 -- * Converting Julia values into Haskell values
+
+jlInt :: JLVal -> IO Int
+jlInt v = case finiteBitSize (undefined :: Int) of
+            64 -> fromIntegral <$> jlInt64 v
+            32 -> fromIntegral <$> jlInt32 v
+
+jlWord :: JLVal -> IO Word
+jlWord v = case finiteBitSize (undefined :: Word) of
+            64 -> fromIntegral <$> jlWord64 v
+            32 -> fromIntegral <$> jlWord32 v
+
+jlCSize :: JLVal -> IO CSize
+jlCSize v = case finiteBitSize (undefined :: CSize) of
+            64 -> fromIntegral <$> jlWord64 v
+            32 -> fromIntegral <$> jlWord32 v
 
 jlInt64 :: JLVal -> IO Int64
 jlInt64 (JLVal i) = withForeignPtr i $ \p -> callJuliaUnsafe jl_unbox_int64 retInt64 [argPtr p]

@@ -10,24 +10,35 @@ import           Data.Int
 import           Data.MonoTraversable
 import qualified Data.Vector.Storable      as V
 
-import           Language.Julia.Inline
+import           Foreign.C.Types
 
-main = defaultMain qcProps
+import           Language.Julia.Inline
+import           Language.Julia.Inline.InternalDynamic
+
+main = do
+  defaultMain qcProps
+  jlExit
 
 instance (V.Storable a, Arbitrary a) => Arbitrary (V.Vector a) where
     arbitrary = fmap V.fromList arbitrary
 
+instance Arbitrary CSize where
+    arbitrary = fmap fromIntegral (arbitrary :: Gen Int64)
+
 qcProps = testGroup "round trip"
-  [ testRoundtrip hsInt8           jlInt8           "Int8"           Nothing
+  [ testRoundtrip hsInt            jlInt            "Int"            Nothing
+  , testRoundtrip hsInt8           jlInt8           "Int8"           Nothing
   , testRoundtrip hsInt16          jlInt16          "Int16"          Nothing
   , testRoundtrip hsInt32          jlInt32          "Int32"          Nothing
   , testRoundtrip hsInt64          jlInt64          "Int64"          Nothing
+  , testRoundtrip hsWord           jlWord           "Word"           Nothing
   , testRoundtrip hsWord8          jlWord8          "Word8"          Nothing
   , testRoundtrip hsWord16         jlWord16         "Word16"         Nothing
   , testRoundtrip hsWord32         jlWord32         "Word32"         Nothing
   , testRoundtrip hsWord64         jlWord64         "Word64"         Nothing
   , testRoundtrip hsFloat          jlFloat          "Float"          Nothing
   , testRoundtrip hsDouble         jlDouble         "Double"         Nothing
+  , testRoundtrip hsCSize          jlCSize          "CSize"          Nothing
   , testRoundtrip hsString         jlString         "String"         (Just noNul)
   , testRoundtrip hsByteString     jlByteString     "ByteString"     Nothing
   , testRoundtrip hsLazyByteString jlLazyByteString "LazyByteString" Nothing

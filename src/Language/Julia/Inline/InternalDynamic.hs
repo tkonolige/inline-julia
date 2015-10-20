@@ -23,6 +23,7 @@ module Language.Julia.Inline.InternalDynamic (
   , jlCallFunction
   , jlEvalString
   , showJL
+  , jlExit
   ) where
 
 import Foreign.LibFFI
@@ -191,10 +192,16 @@ jlInit s = do
   -- TODO: inline this file here? jl_load_file_string?
   -- set up global array to hold haskell references to julia
   callFFI jl_eval_string (retPtr retVoid) [argString "push!(LOAD_PATH, \"./julia\"); import HaskellGC"]
-  -- Install julia's atexit hook
-  jl_atexit_hook <- dlsym libjulia "jl_atexit_hook"
-  atexit jl_atexit_hook
+  -- Install julia's atexit hook (currently not working)
+  -- jl_atexit_hook <- dlsym libjulia "jl_atexit_hook"
+  -- atexit jl_atexit_hook
   return ()
+
+-- | Perform cleanup of Julia
+jlExit :: IO ()
+jlExit = do
+  jl_atexit_hook <- dlsym libjulia "jl_atexit_hook"
+  callFFI jl_atexit_hook retVoid []
 
 -- TODO: fix int64, should be platform dependant
 jlGCPop :: Int64 -> IO ()

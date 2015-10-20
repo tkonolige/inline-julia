@@ -29,7 +29,7 @@ function show(x)
 end
 
 function finalize_hs(p)
-  ccall(:hs_free_stable_ptr, Void, (Ptr{Void},), pointer(p))
+  ccall(:hs_free_stable_ptr, Void, (Ptr{Void},), p)
 end
 
 end

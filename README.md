@@ -9,10 +9,8 @@ A haskell library for writing inline julia code
 import Language.Julia.Inline
 
 main = do
-  let x = "Hello World"
-  [julia| println($(hsString x)) |]
-
-  l :: [Int] <- [julia| [1,2,3,4] |] >>= jlList
+  let l = [1,2,4,5] :: [Int]
+  ([julia| map(x->x+1, $l) |] >>= jlList) :: IO [Int] -- returns [2,3,4,5,6]
 ```
 
 ## TODO:
@@ -23,3 +21,4 @@ main = do
 - [x] `$varname` with typeclass for easy passing of variables
 - [ ] rewrite rules optimizations
 - [ ] Better error messages
+- [ ] Use precompilation
