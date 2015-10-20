@@ -22,3 +22,4 @@ main = do
 - [ ] rewrite rules optimizations
 - [ ] Better error messages
 - [ ] Use precompilation
+- [ ] don't use libffi
