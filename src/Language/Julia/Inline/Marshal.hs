@@ -104,7 +104,10 @@ instance JLConvertable CString where
   jlType _ = "Cstring"
 
 instance JLConvertable B.ByteString where
-  jlType _ = "ASCIIString" -- TODO: maybe Vector{UInt8}?
+  jlType _ = "Vector{UInt8}"
+
+instance JLConvertable BL.ByteString where
+  jlType _ = "Vector{UInt8}"
 
 instance JLConvertable String where
   jlType _ = "ASCIIString"
@@ -242,12 +245,14 @@ hsVector v = V.thaw v >>= \v' -> hsMVector v'
 hsList :: (Storable a, JLConvertable a) => [a] -> IO JLVal
 hsList v = hsVector (V.fromList v)
 
+-- TODO: use size_t
+-- TODO: call c from haskell
 -- | Clone a 'B.ByteString' and pass it to Julia.
 hsByteString :: B.ByteString -> IO JLVal
-hsByteString s = unsafeUseAsCStringLen s $ \(cs, l) -> do
-  jb <- [julia| bytestring(convert(Ptr{UInt8}, $(hsVoidPtr $ castPtr cs)), $(hsInt64 $ fromIntegral l)) |]
-  juliaGC s jb
-  return jb
+hsByteString s = case B.length s of
+  0 -> [julia| ""::ASCIIString |]
+  _ -> unsafeUseAsCStringLen s $ \(cs, l) -> do
+    [julia| ccall(:jl_pchar_to_array, Vector{UInt8}, (Ptr{Void}, UInt64), $(hsVoidPtr $ castPtr cs), $(hsWord64 $ fromIntegral l)) |]
 
 -- | Clone a lazy 'BL.ByteString' and pass it to Julia.
 hsLazyByteString :: BL.ByteString -> IO JLVal
@@ -340,7 +345,7 @@ jlString v = withJLVal v $ do
 jlByteString :: JLVal -> IO B.ByteString
 jlByteString v = withJLVal v $ do
   l <- [julia| length($(jl v)) |] >>= jlInt64
-  jp@(JLVal jp') <- [julia| Base.unsafe_convert(Cstring, $(jl v)) |]
+  jp@(JLVal jp') <- [julia| Base.unsafe_convert(Ptr{UInt8}, $(jl v)) |]
   p <- jlVoidPtr jp
   unsafePackCStringFinalizer (castPtr p) (fromIntegral l) (touchForeignPtr jp')
 

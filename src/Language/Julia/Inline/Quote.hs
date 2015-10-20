@@ -7,6 +7,7 @@ module Language.Julia.Inline.Quote (
    julia
  , hsVoidPtr
  , hsString
+ , JLVal
  ) where
 
 import Language.Julia.Inline.InternalDynamic
@@ -107,6 +108,7 @@ hsVoidPtr i = callJulia jl_box_voidpointer [argPtr i]
 
 -- TODO: use CStringLen
 -- | Box a 'String' and pass it to Julia
+-- The passed string cannot contain NULL or invalid ASCII characters
 hsString :: String -> IO JLVal
 hsString s = withCString s $ \cs -> do
   js <- hsVoidPtr $ castPtr cs

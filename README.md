@@ -20,3 +20,5 @@ main = do
 - [ ] Automatic marshaling of data types
 - [ ] Typechecking julia code
 - [ ] Infer return type from julia code
+- [ ] `$varname` with typeclass for easy passing of variables
+- [ ] rewrite rules optimizations
