@@ -16,9 +16,10 @@ main = do
 ```
 
 ## TODO:
-- [ ] Tests
-- [ ] Automatic marshaling of data types
+- [x] Tests
+- [x] Automatic marshaling of data types
 - [ ] Typechecking julia code
 - [ ] Infer return type from julia code
-- [ ] `$varname` with typeclass for easy passing of variables
+- [x] `$varname` with typeclass for easy passing of variables
 - [ ] rewrite rules optimizations
+- [ ] Better error messages

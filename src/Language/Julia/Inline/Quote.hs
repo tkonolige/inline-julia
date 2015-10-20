@@ -5,29 +5,38 @@
 -}
 module Language.Julia.Inline.Quote (
    julia
+ , JLConvertable(..)
  , hsVoidPtr
  , hsString
+ , hsCString
  , JLVal
  ) where
 
-import Language.Julia.Inline.InternalDynamic
+import           Language.Julia.Inline.InternalDynamic
 
-import System.IO.Unsafe
-import Foreign.C.String
-import Foreign.Ptr
-import Foreign.LibFFI
-import Control.Exception as E
+import           Control.Exception                     as E
+import           Foreign.C.String
+import           Foreign.LibFFI
+import           Foreign.Ptr
+import           System.IO.Unsafe
 
-import Language.Haskell.TH.Syntax
-import Language.Haskell.TH.Quote
-import Language.Haskell.TH
-import Language.Haskell.Meta.Parse
+import           Language.Haskell.Meta.Parse
+import           Language.Haskell.TH
+import           Language.Haskell.TH.Quote
+import           Language.Haskell.TH.Syntax
 
-import Text.Megaparsec as P
-import Text.Megaparsec.String
+import           Text.Megaparsec                       as P
+import           Text.Megaparsec.String
 
-import Data.List
-import Data.Maybe
+import           Data.List
+import           Data.Maybe
+
+-- | Type class to determine the name of a Haskell type in Julia
+class JLConvertable a where
+  jlType :: a      -- ^ @a@ is not used
+         -> String -- ^ 'String' represemtation of Julia type
+  toJL :: a -> IO JLVal -- | convert @a@ to a Julia value
+
 
 parseJulia :: String -> IO JLVal
 parseJulia s = do
@@ -37,12 +46,15 @@ parseJulia s = do
 -- TODO: better error messages
 data Token = TString Char
            | TPat String
+           | TSingle String
            deriving (Eq, Show)
 
 -- Parser for quasiquote string
 antiquoter :: Parsec String [Token]
-antiquoter = many (P.try antiquote <|> (TString <$> anyChar)) <* eof
+antiquoter = many (P.try antiquote <|> P.try singlequote <|> (TString <$> anyChar)) <* eof
   where
+    singlequote = char '$' *> (TSingle <$>
+      ((:) <$> lowerChar <*> many (alphaNumChar <|> char '\'')))
     antiquote = string "$(" *> (TPat <$> (concat <$> many parens)) <* char ')'
     parens =  (P.try $ do
       p1 <- char '('
@@ -59,9 +71,11 @@ mkCall ts = [| sequence $(listE vars) >>= $(callFunc) |]
     callFunc = appE [|jlCallFunction|] (stringE $ mkJLFunc ts)
     failLeft (Right a) = return a
     failLeft (Left a) = fail a
-    vars = map (failLeft . parseExp) $ catMaybes $ map isPat ts
-    isPat (TString _) = Nothing
-    isPat (TPat s) = Just s
+    vars = catMaybes $ map f ts
+      where
+        f (TString _) = Nothing
+        f (TPat s) = Just $ failLeft $ parseExp s
+        f (TSingle s) = Just $ appE [| toJL |] (failLeft $ parseExp s)
 
 mkJLFunc :: [Token] -> String
 mkJLFunc ts = "(" ++ intercalate "," args ++ ") -> " ++ body
@@ -73,6 +87,9 @@ mkJLFunc ts = "(" ++ intercalate "," args ++ ") -> " ++ body
     go ((TPat _):xs) i = let (a, x) = go xs (i+1)
                              arg = "__hs_" ++ show i
                           in (arg : a, arg ++ x)
+    go ((TSingle _):xs) i = let (a, x) = go xs (i+1)
+                                arg = "__hs_" ++ show i
+                            in (arg : a, arg ++ x)
 
 -- | A 'QuasiQuoter' for Julia functions, arguments are passed in with @$()@.
 -- Arguments provided must be of type 'IO'
@@ -110,6 +127,11 @@ hsVoidPtr i = callJulia jl_box_voidpointer [argPtr i]
 -- | Box a 'String' and pass it to Julia
 -- The passed string cannot contain NULL or invalid ASCII characters
 hsString :: String -> IO JLVal
-hsString s = withCString s $ \cs -> do
+hsString s = withCString s hsCString
+
+-- | Box a 'CString' as a Julia Value
+-- The passed string cannot contain NULL or invalid ASCII characters
+hsCString :: CString -> IO JLVal
+hsCString cs = do
   js <- hsVoidPtr $ castPtr cs
   jlCallFunction "x -> bytestring(convert(Ptr{UInt8}, x))" [js]

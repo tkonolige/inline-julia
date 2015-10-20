@@ -71,55 +71,65 @@ import           Language.Julia.Inline.Quote
 
 -- TODO: create hsInt
 
--- | Type class to determine the name of a Haskell type in Julia
-class JLConvertable a where
-  jlType :: a      -- ^ @a@ is not used
-         -> String -- ^ 'String' represemtation of Julia type
-
 instance JLConvertable Int8 where
   jlType _ = "Int8"
+  toJL = hsInt8
 
 instance JLConvertable Int16 where
   jlType _ = "Int16"
+  toJL = hsInt16
 
 instance JLConvertable Int32 where
   jlType _ = "Int32"
+  toJL = hsInt32
 
 instance JLConvertable Int64 where
   jlType _ = "Int64"
+  toJL = hsInt64
 
 instance JLConvertable Word8 where
   jlType _ = "Word8"
+  toJL = hsWord8
 
 instance JLConvertable Word16 where
   jlType _ = "Word16"
+  toJL = hsWord16
 
 instance JLConvertable Word32 where
   jlType _ = "Word32"
+  toJL = hsWord32
 
 instance JLConvertable Word64 where
   jlType _ = "Word64"
+  toJL = hsWord64
 
 instance JLConvertable CString where
   jlType _ = "Cstring"
+  toJL = hsCString
 
 instance JLConvertable B.ByteString where
   jlType _ = "Vector{UInt8}"
+  toJL = hsByteString
 
 instance JLConvertable BL.ByteString where
   jlType _ = "Vector{UInt8}"
+  toJL = hsLazyByteString
 
-instance JLConvertable String where
+instance {-# OVERLAPPING #-} JLConvertable String where
   jlType _ = "ASCIIString"
+  toJL = hsString
 
-instance JLConvertable a => JLConvertable (VM.IOVector a) where
+instance (Storable a, JLConvertable a) => JLConvertable (VM.IOVector a) where
   jlType _ = "Vector{" ++ jlType (undefined :: a) ++ "}"
+  toJL = hsMVector
 
-instance JLConvertable a => JLConvertable (V.Vector a) where
+instance (Storable a, JLConvertable a) => JLConvertable (V.Vector a) where
   jlType _ = "Vector{" ++ jlType (undefined :: a) ++ "}"
+  toJL = hsVector
 
-instance JLConvertable a => JLConvertable [a] where
+instance (Storable a, JLConvertable a) => JLConvertable [a] where
   jlType _ = "Vector{" ++ jlType (undefined :: a) ++ "}"
+  toJL = hsList
 
 -- | Make sure a JLVal lives for a scope
 withJLVal :: JLVal -> IO a -> IO a
