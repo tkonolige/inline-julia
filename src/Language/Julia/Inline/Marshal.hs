@@ -1,9 +1,9 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE QuasiQuotes              #-}
+{-# LANGUAGE ScopedTypeVariables      #-}
+{-# LANGUAGE TemplateHaskell          #-}
+{-# LANGUAGE TypeSynonymInstances     #-}
 
 module Language.Julia.Inline.Marshal (
     JLConvertable(..)
@@ -47,27 +47,27 @@ module Language.Julia.Inline.Marshal (
   , jlLazyByteString
   ) where
 
+import qualified Data.ByteString              as B
+import qualified Data.ByteString.Lazy         as BL
+import           Data.ByteString.Unsafe
+import           Data.Int
+import qualified Data.Vector.Storable         as V
 import qualified Data.Vector.Storable.Mutable as VM
-import qualified Data.Vector.Storable as V
-import qualified Data.ByteString as B
-import Data.ByteString.Unsafe
-import qualified Data.ByteString.Lazy as BL
-import Data.Int
-import Data.Word
-import Foreign.Marshal
-import Foreign.Storable
-import Foreign.StablePtr
-import Foreign.ForeignPtr
-import Foreign.Ptr
-import Foreign.LibFFI
-import Foreign.C.Types
-import Foreign.C.String
+import           Data.Word
+import           Foreign.C.String
+import           Foreign.C.Types
+import           Foreign.ForeignPtr
+import           Foreign.LibFFI
+import           Foreign.Marshal
+import           Foreign.Ptr
+import           Foreign.StablePtr
+import           Foreign.Storable
 
-import System.Posix.DynamicLinker
-import System.IO.Unsafe
+import           System.IO.Unsafe
+import           System.Posix.DynamicLinker
 
-import Language.Julia.Inline.InternalDynamic
-import Language.Julia.Inline.Quote
+import           Language.Julia.Inline.InternalDynamic
+import           Language.Julia.Inline.Quote
 
 -- TODO: create hsInt
 
