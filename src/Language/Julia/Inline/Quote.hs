@@ -95,8 +95,14 @@ mkJLFunc ts = "(" ++ intercalate "," args ++ ") -> " ++ body
 -- Arguments provided must be of type 'IO'
 -- 'Language.Julia.Inline.InternalDynamic.JLVal'. Look in
 -- "Language.Julia.Inline.Marshal" for marshaling data to and from Julia.
+-- Arguments can be used with the default marshaler by using @$varname@.
+-- Explicit marshalers use the @$(marshaler varname)@ syntax.
 --
 -- A couple examples:
+--
+-- >> let x = [1,2,3] :: [Int]
+-- >> [julia| map(x -> x+1, $x) |]
+-- > julia: [2,3,4]
 --
 -- >> [julia| println($(hsString "Hello World")) |]
 -- > Hello World
