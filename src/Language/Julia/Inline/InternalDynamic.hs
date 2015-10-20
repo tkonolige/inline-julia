@@ -26,24 +26,26 @@ module Language.Julia.Inline.InternalDynamic (
   , jlExit
   ) where
 
-import Foreign.LibFFI
-import Foreign.Ptr
-import Foreign.ForeignPtr
-import Foreign.Marshal.Array
-import Foreign.Marshal.Utils
-import Foreign.Marshal.Alloc
-import Foreign.Storable
-import Foreign.StablePtr
-import Foreign.C.String
-import Foreign.C.Types
-import GHC.ForeignPtr
-import System.Posix.DynamicLinker
-import System.IO.Unsafe
-import Control.Exception
-import Control.Monad
-import Data.Int
-import Data.Word
-import Control.Concurrent.MVar
+import           Control.Concurrent.MVar
+import           Control.Exception
+import           Control.Monad
+import           Data.Int
+import           Data.Word
+import           Foreign.C.String
+import           Foreign.C.Types
+import           Foreign.ForeignPtr
+import           Foreign.LibFFI
+import           Foreign.Marshal.Alloc
+import           Foreign.Marshal.Array
+import           Foreign.Marshal.Utils
+import           Foreign.Ptr
+import           Foreign.StablePtr
+import           Foreign.Storable
+import           GHC.ForeignPtr
+import           System.IO.Unsafe
+import           System.Posix.DynamicLinker
+import           System.FilePath (takeDirectory)
+import           Paths_inline_julia
 
 {- $mem
    Memory management when briding the gap between julia and haskell is a
@@ -191,7 +193,9 @@ jlInit s = do
     Nothing -> callFFI jl_init retVoid [argPtr nullPtr]
   -- TODO: inline this file here? jl_load_file_string?
   -- set up global array to hold haskell references to julia
-  callFFI jl_eval_string (retPtr retVoid) [argString "push!(LOAD_PATH, \"./julia\"); import HaskellGC"]
+  datapath <- takeDirectory <$> getDataFileName "HaskellGC.jl"
+  callFFI jl_eval_string (retPtr retVoid)
+    [argString $ "push!(LOAD_PATH, \"" ++ datapath ++ "\"); import HaskellGC"]
   -- Install julia's atexit hook (currently not working)
   -- jl_atexit_hook <- dlsym libjulia "jl_atexit_hook"
   -- atexit jl_atexit_hook

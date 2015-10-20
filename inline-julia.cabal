@@ -9,7 +9,8 @@ maintainer:          tristan.konolige@gmail.com
 category:            Language
 build-type:          Simple
 extra-source-files:  ChangeLog.md
-                   , julia/HaskellGC.jl
+data-files:          HaskellGC.jl
+data-dir:            julia
 cabal-version:       >=1.10
 
 library
@@ -17,6 +18,7 @@ library
                      , Language.Julia.Inline.InternalDynamic
                      , Language.Julia.Inline.Marshal
                      , Language.Julia.Inline.Quote
+  other-modules:       Paths_inline_julia
   c-sources:           cbits/internal.c
   cc-options:          -fPIC
   build-depends:       base >=4.8 && <4.9
@@ -27,6 +29,7 @@ library
                      , haskell-src-meta
                      , vector
                      , bytestring
+                     , filepath
   hs-source-dirs:      src
   default-language:    Haskell2010
   build-tools:         c2hs
